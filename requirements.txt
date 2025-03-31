@@ -3,5 +3,4 @@ uvicorn
 requests
 websockets
 asyncio
-json
 requests
