@@ -71,10 +71,32 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"WebSocket error: {str(e)}")
         manager.disconnect(websocket)
 
+# async def fetch_initial_snapshot(symbol="BTCUSDT"):
+#     try:
+#         params = {"symbol": symbol, "limit": 5000}
+#         response = requests.get(REST_API_URL, params=params)
+#         response.raise_for_status()
+#         return response.json()
+#     except Exception as e:
+#         print(f"Snapshot error: {str(e)}")
+#         return None
+
+PROXY_URL = os.getenv("PROXY_URL")  # 例如: "http://user:pass@proxyip:port"
+
 async def fetch_initial_snapshot(symbol="BTCUSDT"):
     try:
-        params = {"symbol": symbol, "limit": 5000}
-        response = requests.get(REST_API_URL, params=params)
+        params = {"symbol": symbol, "limit": 100}  # 减少limit值
+        proxies = {
+            "http": PROXY_URL,
+            "https": PROXY_URL
+        } if PROXY_URL else None
+        
+        response = requests.get(
+            REST_API_URL,
+            params=params,
+            proxies=proxies,
+            timeout=10
+        )
         response.raise_for_status()
         return response.json()
     except Exception as e:
