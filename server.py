@@ -73,7 +73,7 @@ async def websocket_endpoint(websocket: WebSocket):
 
 async def fetch_initial_snapshot(symbol="BTCUSDT"):
     try:
-        params = {"symbol": symbol, "limit": 1000}
+        params = {"symbol": symbol, "limit": 5000}
         response = requests.get(REST_API_URL, params=params)
         response.raise_for_status()
         return response.json()
