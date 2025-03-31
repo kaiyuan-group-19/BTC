@@ -8,8 +8,8 @@ import requests
 
 app = FastAPI()
 
-# 挂载静态文件目录
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# # 挂载静态文件目录
+# app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # 全局变量
 clients = []  # 存储所有连接的 WebSocket 客户端
