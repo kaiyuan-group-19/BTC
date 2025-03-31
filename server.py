@@ -25,7 +25,7 @@ orderbook = {"bids": {}, "asks": {}}
 lastUpdateId = None
 
 # Binance API配置
-REST_API_URL = "https://api.binance.com/api/v3/depth"
+REST_API_URL = "https://api1.binance.com/api/v3/depth"
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@depth"
 
 class ConnectionManager:
