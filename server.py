@@ -116,5 +116,7 @@ async def run_server():
 async def main():
     await asyncio.gather(run_server(), initialize_orderbook("BTCUSDT"))
 
-if __name__ == "__main__":
-    asyncio.run(main())
+# if __name__ == "__main__":
+#     asyncio.run(main())
+
+asyncio.run(main())
