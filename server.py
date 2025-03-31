@@ -1,122 +1,135 @@
-from fastapi import FastAPI, WebSocket
-from fastapi.staticfiles import StaticFiles
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 import asyncio
 import json
 import websockets
 import requests
+from datetime import datetime
 
 app = FastAPI()
 
-# # 挂载静态文件目录
-# app.mount("/static", StaticFiles(directory="static"), name="static")
+# CORS配置
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # 全局变量
-clients = []  # 存储所有连接的 WebSocket 客户端
-orderbook = {"bids": {}, "asks": {}}  # 本地订单簿副本
-lastUpdateId = None  # 记录订单簿最新的更新 ID
+clients = []
+orderbook = {"bids": {}, "asks": {}}
+lastUpdateId = None
 
-# Binance API 和 WebSocket 地址
+# Binance API配置
 REST_API_URL = "https://api.binance.com/api/v3/depth"
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@depth"
 
-# WebSocket 连接
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+        print(f"New client connected. Total: {len(self.active_connections)}")
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+        print(f"Client disconnected. Total: {len(self.active_connections)}")
+
+    async def broadcast(self, message: str):
+        for connection in self.active_connections:
+            try:
+                await connection.send_text(message)
+            except:
+                self.disconnect(connection)
+
+manager = ConnectionManager()
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    clients.append(websocket)
+    await manager.connect(websocket)
     try:
+        # 立即发送当前订单簿状态
+        if orderbook["bids"] and orderbook["asks"]:
+            await websocket.send_text(json.dumps({
+                **orderbook,
+                "timestamp": datetime.utcnow().isoformat()
+            }))
+
         while True:
-            await websocket.receive_text()  # 监听客户端消息
+            # 保持连接活跃
+            await websocket.receive_text()
+            await asyncio.sleep(5)  # 心跳间隔
+
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
     except Exception as e:
-        print(f"Client disconnected: {e}")
-    finally:
-        clients.remove(websocket)
+        print(f"WebSocket error: {str(e)}")
+        manager.disconnect(websocket)
 
-# 广播数据
-async def broadcast(message: str):
-    for client in clients:
-        try:
-            await client.send_text(message)
-        except:
-            clients.remove(client)
-
-# 初始化订单簿
-async def initialize_orderbook(symbol):
-    global lastUpdateId, orderbook
-
-    # 获取初始快照
-    snapshot = fetch_initial_snapshot(symbol)
-    if snapshot is None:
-        print("Failed to fetch initial snapshot.")
-        return
-
-    lastUpdateId = snapshot["lastUpdateId"]
-
-    for price, quantity in snapshot["bids"]:
-        update_orderbook("bids", float(price), float(quantity))
-    for price, quantity in snapshot["asks"]:
-        update_orderbook("asks", float(price), float(quantity))
-
-    print(f"Initialized orderbook with lastUpdateId: {lastUpdateId}")
-
-    # 连接 Binance WebSocket 处理增量更新
-    async with websockets.connect(WS_URL) as websocket:
-        print(f"Connected to {WS_URL}")
-        async for message in websocket:
-            data = json.loads(message)
-            handle_depth_update(data)
-            await broadcast(json.dumps(orderbook))
-
-# 获取快照
-def fetch_initial_snapshot(symbol):
+async def fetch_initial_snapshot(symbol="BTCUSDT"):
     try:
-        params = {"symbol": symbol.upper(), "limit": 5000}
+        params = {"symbol": symbol, "limit": 1000}
         response = requests.get(REST_API_URL, params=params)
         response.raise_for_status()
         return response.json()
-    except requests.exceptions.RequestException as e:
-        print(f"Failed to fetch snapshot: {e}")
+    except Exception as e:
+        print(f"Snapshot error: {str(e)}")
         return None
 
-# 归一化订单簿（10 USDT 合并）
-def update_orderbook(side, price, quantity):
-    rounded_price = round(price / 10) * 10  # 价格归 10 USDT 合并
-    if quantity == 0:
-        orderbook[side].pop(rounded_price, None)
-    else:
-        orderbook[side][rounded_price] = orderbook[side].get(rounded_price, 0) + quantity
+def normalize_price(price):
+    return round(float(price) / 10) * 10  # 按10美元分组
 
-# 处理 Binance 增量深度更新
-def handle_depth_update(data):
-    global lastUpdateId
-    U, u = data["U"], data["u"]
+def update_orderbook(data):
+    global lastUpdateId, orderbook
+    
+    # 更新买单
+    for price, quantity in data.get('b', []):
+        norm_price = normalize_price(price)
+        if float(quantity) == 0:
+            orderbook["bids"].pop(norm_price, None)
+        else:
+            orderbook["bids"][norm_price] = orderbook["bids"].get(norm_price, 0) + float(quantity)
+    
+    # 更新卖单
+    for price, quantity in data.get('a', []):
+        norm_price = normalize_price(price)
+        if float(quantity) == 0:
+            orderbook["asks"].pop(norm_price, None)
+        else:
+            orderbook["asks"][norm_price] = orderbook["asks"].get(norm_price, 0) + float(quantity)
 
-    if u < lastUpdateId:
-        return
+async def binance_websocket_listener():
+    while True:
+        try:
+            async with websockets.connect(WS_URL) as ws:
+                print("Connected to Binance WebSocket")
+                async for message in ws:
+                    data = json.loads(message)
+                    update_orderbook(data)
+                    await manager.broadcast(json.dumps({
+                        **orderbook,
+                        "timestamp": datetime.utcnow().isoformat()
+                    }))
+        except Exception as e:
+            print(f"Binance connection lost: {str(e)}. Reconnecting in 5s...")
+            await asyncio.sleep(5)
 
-    if U > lastUpdateId + 1:
-        print("WARNING: Missing updates, reinitializing orderbook.")
-        asyncio.create_task(initialize_orderbook("BTCUSDT"))
-        return
-
-    for price, quantity in data["b"]:
-        update_orderbook("bids", float(price), float(quantity))
-    for price, quantity in data["a"]:
-        update_orderbook("asks", float(price), float(quantity))
-
-    lastUpdateId = u
-
-# 运行服务器
-async def run_server():
-    config = uvicorn.Config(app, host="0.0.0.0", port=8000)
-    server = uvicorn.Server(config)
-    await server.serve()
-
-async def main():
-    await asyncio.gather(run_server(), initialize_orderbook("BTCUSDT"))
+@app.on_event("startup")
+async def startup_event():
+    # 初始化订单簿
+    snapshot = await fetch_initial_snapshot()
+    if snapshot:
+        global lastUpdateId
+        lastUpdateId = snapshot["lastUpdateId"]
+        update_orderbook({"b": snapshot["bids"], "a": snapshot["asks"]})
+    
+    # 启动Binance监听
+    asyncio.create_task(binance_websocket_listener())
 
 if __name__ == "__main__":
-    asyncio.run(main())
-
-# asyncio.run(main())
+    uvicorn.run(app, host="0.0.0.0", port=8000)
