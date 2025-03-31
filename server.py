@@ -25,7 +25,7 @@ orderbook = {"bids": {}, "asks": {}}
 lastUpdateId = None
 
 # Binance API配置
-REST_API_URL = "https://api1.binance.com/api/v3/depth"
+REST_API_URL = "https://api.binance.com/api/v3/depth"
 WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@depth"
 
 class ConnectionManager:
@@ -72,37 +72,37 @@ async def websocket_endpoint(websocket: WebSocket):
         print(f"WebSocket error: {str(e)}")
         manager.disconnect(websocket)
 
-# async def fetch_initial_snapshot(symbol="BTCUSDT"):
-#     try:
-#         params = {"symbol": symbol, "limit": 5000}
-#         response = requests.get(REST_API_URL, params=params)
-#         response.raise_for_status()
-#         return response.json()
-#     except Exception as e:
-#         print(f"Snapshot error: {str(e)}")
-#         return None
-
-PROXY_URL = os.getenv("PROXY_URL")  # 例如: "http://user:pass@proxyip:port"
-
 async def fetch_initial_snapshot(symbol="BTCUSDT"):
     try:
-        params = {"symbol": symbol, "limit": 100}  # 减少limit值
-        proxies = {
-            "http": PROXY_URL,
-            "https": PROXY_URL
-        } if PROXY_URL else None
-        
-        response = requests.get(
-            REST_API_URL,
-            params=params,
-            proxies=proxies,
-            timeout=10
-        )
+        params = {"symbol": symbol, "limit": 5000}
+        response = requests.get(REST_API_URL, params=params)
         response.raise_for_status()
         return response.json()
     except Exception as e:
         print(f"Snapshot error: {str(e)}")
         return None
+
+# PROXY_URL = os.getenv("PROXY_URL")  # 例如: "http://user:pass@proxyip:port"
+
+# async def fetch_initial_snapshot(symbol="BTCUSDT"):
+#     try:
+#         params = {"symbol": symbol, "limit": 100}  # 减少limit值
+#         proxies = {
+#             "http": PROXY_URL,
+#             "https": PROXY_URL
+#         } if PROXY_URL else None
+        
+#         response = requests.get(
+#             REST_API_URL,
+#             params=params,
+#             proxies=proxies,
+#             timeout=10
+#         )
+#         response.raise_for_status()
+#         return response.json()
+#     except Exception as e:
+#         print(f"Snapshot error: {str(e)}")
+#         return None
 
 def normalize_price(price):
     return round(float(price) / 10) * 10  # 按10美元分组
